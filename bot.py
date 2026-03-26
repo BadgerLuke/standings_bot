@@ -29,7 +29,7 @@ def get_live_season(domain, league_id):
         for s in data['response'][0]['seasons']:
             if s.get('current') == True:
                 return s['year']
-        return 2025 # Fallback
+        return 2026 # Fallback
     except:
         return 2025
 
