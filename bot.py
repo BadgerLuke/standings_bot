@@ -15,9 +15,6 @@ SPORTS_KEY = os.getenv("SPORTS_API_KEY")
 # Revised Pool: simplified targets for better matching
 POOL = [
     {"name": "Western Conference", "id": 3, "sport": "hockey", "domain": "v1.hockey", "target": "Atlantic"},
-    {"name": "Eastern Conference", "id": 3, "sport": "hockey", "domain": "v1.hockey", "target": "Metropolitan"},
-    {"name": "NBA Atlantic", "id": 12, "sport": "nba", "domain": "v1.basketball", "target": "Atlantic"},
-    {"name": "MLS Eastern", "id": 253, "sport": "soccer", "domain": "v3.football", "target": "Eastern"}
 ]
 
 def get_live_season(domain, league_id):
