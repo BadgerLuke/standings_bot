@@ -14,9 +14,12 @@ SPORTS_KEY = os.getenv("SPORTS_API_KEY")
 
 # Updated Pool with corrected IDs for 2026
 POOL = [
-    {"name": "NHL Atlantic", "id": 57, "sport": "hockey", "domain": "v1.hockey", "target": "Atlantic"},
-    {"name": "NHL Metropolitan", "id": 57, "sport": "hockey", "domain": "v1.hockey", "target": "Metropolitan"},
-
+    {"name": "NHL Atlantic", "id": 3, "sport": "hockey", "domain": "v1.hockey", "target": "Atlantic"},
+    {"name": "NHL Metropolitan", "id": 3, "sport": "hockey", "domain": "v1.hockey", "target": "Metropolitan"},
+    {"name": "NHL Central", "id": 3, "sport": "hockey", "domain": "v1.hockey", "target": "Central"},
+    {"name": "NHL Pacific", "id": 3, "sport": "hockey", "domain": "v1.hockey", "target": "Pacific"},
+    {"name": "NBA Eastern", "id": 12, "sport": "nba", "domain": "v1.basketball", "target": "East"},
+    {"name": "NBA Western", "id": 12, "sport": "nba", "domain": "v1.basketball", "target": "West"}
 ]
 
 def fetch_data(choice):
