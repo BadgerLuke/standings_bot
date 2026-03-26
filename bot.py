@@ -12,94 +12,90 @@ X_CLIENT = tweepy.Client(
 )
 SPORTS_KEY = os.getenv("SPORTS_API_KEY")
 
-# Revised Pool: simplified targets for better matching
+# Updated Pool with corrected IDs for 2026
 POOL = [
-    {"name": "Western Conference", "id": 3, "sport": "hockey", "domain": "v1.hockey", "target": "Atlantic"},
+    {"name": "NHL Atlantic", "id": 57, "sport": "hockey", "domain": "v1.hockey", "target": "Atlantic"},
+    {"name": "NHL Metropolitan", "id": 57, "sport": "hockey", "domain": "v1.hockey", "target": "Metropolitan"},
+    {"name": "NBA Eastern", "id": 12, "sport": "nba", "domain": "v1.basketball", "target": "East"},
+    {"name": "MLS Eastern", "id": 253, "sport": "soccer", "domain": "v3.football", "target": "Eastern"}
 ]
 
-def get_live_season(domain, league_id):
-    """Hits the leagues endpoint to find the exact string for the active season."""
-    url = f"https://{domain}.api-sports.io/leagues"
-    try:
-        res = requests.get(url, headers={"x-apisports-key": SPORTS_KEY}, params={"id": league_id})
-        data = res.json()
-        # Look through seasons for the 'current' flag
-        for s in data['response'][0]['seasons']:
-            if s.get('current') == True:
-                return s['year']
-        return 2025 # Fallback
-    except:
-        return 2025
-
 def fetch_data(choice):
-    season = get_live_season(choice['domain'], choice['id'])
+    # For March 2026, the current NHL/NBA season started in 2025
+    season = 2025 
     url = f"https://{choice['domain']}.api-sports.io/standings"
     
-    print(f"📡 Requesting: {choice['name']} | League: {choice['id']} | Season: {season}")
+    print(f"📡 Requesting {choice['name']} | League ID: {choice['id']} | Season: {season}")
     
     try:
-        params = {"league": choice['id'], "season": season}
-        res = requests.get(url, headers={"x-apisports-key": SPORTS_KEY}, params=params)
-        json_res = res.json()
+        res = requests.get(url, headers={"x-apisports-key": SPORTS_KEY}, params={"league": choice['id'], "season": season})
+        json_data = res.json()
 
-        if not json_res.get('response'):
-            print(f"❌ API literally has no data for {choice['name']} in {season}")
+        # --- DEBUG: Print the structure if empty ---
+        if not json_data.get('response'):
+            print(f"❌ API Error/Empty: {json_data.get('errors')}")
             return None
 
-        # Navigate the response path
-        raw = json_res['response'][0]
-        # Hockey/NBA usually nest under 'league' or 'standings'
-        standings = raw.get('league', {}).get('standings', raw)
-        if 'standings' in raw and not isinstance(standings, list):
-             standings = raw['standings']
+        # API-Sports often wraps standings differently per sport
+        # Hockey: response[0]['league']['standings']
+        # Basketball: response[0]
+        raw_response = json_data['response']
+        
+        # Try to find the list of teams in the three most common spots
+        standings = None
+        if isinstance(raw_response[0], list): # Flat list
+            standings = raw_response[0]
+        elif 'league' in raw_response[0]: # Hockey style
+            standings = raw_response[0]['league'].get('standings', raw_response[0])
+        else:
+            standings = raw_response[0]
 
-        # If it's a list of lists (Divisions), find our target
+        # Handle Nested Divisions (List of Lists)
         if isinstance(standings[0], list):
             for group in standings:
-                # Check team #1 in the group for the division name
+                # Check the first team's group name
                 group_name = group[0].get('group', {}).get('name', '')
                 if choice['target'].lower() in group_name.lower():
                     return group
-            return standings[0] # Fallback to first division found
+            return standings[0] # Fallback
             
-        return standings # Return flat list (NBA/MLS style)
-
+        return standings
     except Exception as e:
-        print(f"⚠️ Fetch Error: {e}")
+        print(f"⚠️ Fetch logic error: {e}")
         return None
 
 def run():
     choice = random.choice(POOL)
     data = fetch_data(choice)
     
-    if not data or not isinstance(data, list):
-        print("⛔ Script stopped: No list data to format.")
+    if not data:
+        print("⛔ No data could be parsed. Check the ID and Season.")
         return
 
     tweet = f"📊 {choice['name']} Standings\n\n"
-    for i, t in enumerate(data[:5], 1):
-        name = t['team']['name']
-        # Robust stat detection
+    for i, team in enumerate(data[:5], 1):
+        name = team['team']['name']
         try:
             if choice['sport'] == "hockey":
-                w = t['games']['win']['total']
-                l = t['games']['lose']['total']
-                ot = t['games']['lose'].get('ot', 0)
-                tweet += f"{i}. {name}: {w}-{l}-{ot} ({t['points']}pts)\n"
+                # NHL v1 Stat Path
+                w = team['games']['win']['total']
+                l = team['games']['lose']['total']
+                ot = team['games']['lose'].get('ot', 0)
+                tweet += f"{i}. {name}: {w}-{l}-{ot} ({team['points']}pts)\n"
             else:
-                w = t.get('won', t.get('wins', {}).get('total', 0))
-                l = t.get('lost', t.get('losses', {}).get('total', 0))
+                w = team.get('won', team.get('wins', {}).get('total', 0))
+                l = team.get('lost', team.get('losses', {}).get('total', 0))
                 tweet += f"{i}. {name}: {w}-{l}\n"
         except:
-            tweet += f"{i}. {name}: Data pending\n"
+            tweet += f"{i}. {name}: Data Pending\n"
 
-    tweet += f"\n#SportsBot #{choice['sport'].upper()}"
+    tweet += f"\n#SportsData #{choice['sport'].upper()}"
     
     try:
         X_CLIENT.create_tweet(text=tweet)
-        print("🚀 SUCCESS: Tweet is live!")
+        print("🚀 SUCCESS! Posted to X.")
     except Exception as e:
-        print(f"❌ X Error: {e}")
+        print(f"❌ X.com Error: {e}")
 
 if __name__ == "__main__":
     run()
