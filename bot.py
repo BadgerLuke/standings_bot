@@ -16,8 +16,7 @@ SPORTS_KEY = os.getenv("SPORTS_API_KEY")
 POOL = [
     {"name": "NHL Atlantic", "id": 57, "sport": "hockey", "domain": "v1.hockey", "target": "Atlantic"},
     {"name": "NHL Metropolitan", "id": 57, "sport": "hockey", "domain": "v1.hockey", "target": "Metropolitan"},
-    {"name": "NBA Eastern", "id": 12, "sport": "nba", "domain": "v1.basketball", "target": "East"},
-    {"name": "MLS Eastern", "id": 253, "sport": "soccer", "domain": "v3.football", "target": "Eastern"}
+
 ]
 
 def fetch_data(choice):
