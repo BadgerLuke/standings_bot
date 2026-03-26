@@ -14,82 +14,97 @@ X_CLIENT = tweepy.Client(
 SPORTS_KEY = os.getenv("SPORTS_API_KEY")
 
 POOL = [
-    {"name": "NHL Atlantic", "id": 57, "sport": "hockey", "domain": "v1.hockey", "target": "Atlantic Division"},
-    {"name": "NHL Metropolitan", "id": 57, "sport": "hockey", "domain": "v1.hockey", "target": "Metropolitan Division"},
+    {"name": "NHL Atlantic", "id": 57, "sport": "hockey", "domain": "v1.hockey", "target": "Atlantic"},
+    {"name": "NHL Metropolitan", "id": 57, "sport": "hockey", "domain": "v1.hockey", "target": "Metropolitan"},
     {"name": "NBA Atlantic", "id": 12, "sport": "nba", "domain": "v1.basketball", "target": "Atlantic"},
-    {"name": "MLS Eastern", "id": 253, "sport": "soccer", "domain": "v3.football", "target": "Eastern Conference"}
+    {"name": "MLS Eastern", "id": 253, "sport": "soccer", "domain": "v3.football", "target": "Eastern"}
 ]
 
-def fetch_standings(choice):
-    url = f"https://{choice['domain']}.api-sports.io/standings"
-    current_year = datetime.datetime.now().year
-    # For NHL/NBA in March, 2025 is the 'start' year of the current season
-    seasons_to_try = [current_year - 1, current_year] 
-    
-    for season in seasons_to_try:
-        try:
-            print(f"--- Checking {choice['name']} | Season: {season} ---")
-            res = requests.get(url, headers={"x-apisports-key": SPORTS_KEY}, params={"league": choice['id'], "season": season})
-            res_data = res.json()
-            
-            if not res_data.get('response'):
-                print(f"Empty response for {season}")
-                continue 
-            
-            # The API usually nests standings inside a list
-            data = res_data['response'][0]
-            standings = data.get('league', {}).get('standings', data)
+def get_current_season(domain, league_id):
+    """Asks the API which season is actually active right now."""
+    url = f"https://{domain}.api-sports.io/leagues"
+    try:
+        res = requests.get(url, headers={"x-apisports-key": SPORTS_KEY}, params={"id": league_id})
+        data = res.json()
+        for season in data['response'][0]['seasons']:
+            if season['current'] == True:
+                return season['year']
+    except:
+        return datetime.datetime.now().year - 1
+    return datetime.datetime.now().year - 1
 
-            # --- DIAGNOSTIC PRINT ---
-            # This helps us see what the groups are actually named
-            if isinstance(standings[0], list):
-                print(f"Found {len(standings)} groups in the response.")
-                for idx, group in enumerate(standings):
-                    group_name = group[0].get('group', {}).get('name', 'Unknown')
-                    print(f"Group {idx}: '{group_name}'")
-                    
-                    # Fuzzy match: Checks if "Atlantic" is in "Atlantic Division"
-                    if choice['target'].lower() in group_name.lower() or group_name.lower() in choice['target'].lower():
-                        print(f"✅ Match found: {group_name}")
-                        return group
-            
-            # If it's not a nested list, just return the whole thing
-            if standings:
-                return standings
-                
-        except Exception as e:
-            print(f"Error on {season}: {e}")
-            continue
-            
-    return None
-def format_row(sport, t):
-    name = t['team']['name']
-    if sport == "hockey":
-        w, l, ot = t['games']['win']['total'], t['games']['lose']['total'], t['games']['lose'].get('ot', 0)
-        return f"{name}: {w}-{l}-{ot} ({t['points']}pts)"
-    elif sport == "soccer":
-        return f"{name}: {t['points']}pts ({t['all']['win']}-{t['all']['draw']}-{t['all']['lose']})"
+def fetch_standings(choice):
+    season = get_current_season(choice['domain'], choice['id'])
+    url = f"https://{choice['domain']}.api-sports.io/standings"
     
-    # NBA/NFL default
-    w = t.get('won', t.get('wins', {}).get('total', 0))
-    l = t.get('lost', t.get('losses', {}).get('total', 0))
-    return f"{name}: {w}-{l}"
+    print(f"🚀 Fetching {choice['name']} | League {choice['id']} | Season {season}")
+    
+    try:
+        res = requests.get(url, headers={"x-apisports-key": SPORTS_KEY}, params={"league": choice['id'], "season": season})
+        res_data = res.json()
+        
+        if not res_data.get('response'):
+            print(f"⚠️ API returned no response for season {season}")
+            return None
+        
+        # Standard API-Sports structure: response[0] contains the standings
+        raw_data = res_data['response'][0]
+        # Some APIs (like Hockey) nest this further under 'league' -> 'standings'
+        standings = raw_data.get('league', {}).get('standings', raw_data)
+
+        # 1. Look for Nested Division Lists
+        if isinstance(standings[0], list):
+            for group in standings:
+                group_name = group[0].get('group', {}).get('name', '')
+                if choice['target'].lower() in group_name.lower():
+                    return group
+            # Fallback: if we can't find the division, just take the first group available
+            return standings[0]
+            
+        # 2. Look for Flat Lists (NBA often uses this)
+        return standings
+                
+    except Exception as e:
+        print(f"❌ Critical Error: {e}")
+        return None
+
+def format_row(sport, t):
+    try:
+        name = t['team']['name']
+        if sport == "hockey":
+            # Accessing keys safely for 2026 schema
+            w = t['games']['win']['total']
+            l = t['games']['lose']['total']
+            ot = t['games']['lose'].get('ot', 0)
+            return f"{name}: {w}-{l}-{ot} ({t['points']}pts)"
+        
+        w = t.get('won', t.get('wins', {}).get('total', 0))
+        l = t.get('lost', t.get('losses', {}).get('total', 0))
+        return f"{name}: {w}-{l}"
+    except:
+        return "Data unavailable"
 
 def run_bot():
     choice = random.choice(POOL)
     data = fetch_standings(choice)
     
-    if not data:
-        print("❌ Final Result: No data found for any season.")
+    if not data or not isinstance(data, list):
+        print("❌ Final Result: Could not parse standings data.")
         return
     
     tweet = f"📊 {choice['name']} Standings\n\n"
+    # Take the top 5 teams
     for i, team in enumerate(data[:5], 1):
-        tweet += f"{i}. {format_row(choice['sport'], team)}\n"
+        row = format_row(choice['sport'], team)
+        tweet += f"{i}. {row}\n"
     
-    tweet += f"\n#SportsData #{choice['name'].replace(' ', '')}"
-    X_CLIENT.create_tweet(text=tweet)
-    print(f"✅ Success: Posted {choice['name']}")
+    tweet += f"\n#Sports #{choice['sport'].upper()}"
+    
+    try:
+        X_CLIENT.create_tweet(text=tweet)
+        print(f"✅ SUCCESSFULLY POSTED TO X!")
+    except Exception as e:
+        print(f"❌ X Posting Error: {e}")
 
 if __name__ == "__main__":
     run_bot()
