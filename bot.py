@@ -21,47 +21,43 @@ POOL = [
 ]
 
 def fetch_data(choice):
-    # For March 2026, the current NHL/NBA season started in 2025
     season = 2025 
     url = f"https://{choice['domain']}.api-sports.io/standings"
+    params = {"league": choice['id'], "season": season}
+    headers = {"x-apisports-key": SPORTS_KEY}
     
-    print(f"📡 Requesting {choice['name']} | League ID: {choice['id']} | Season: {season}")
+    print(f"📡 Requesting: {choice['name']} | League: {choice['id']} | Season: {season}")
     
     try:
-        res = requests.get(url, headers={"x-apisports-key": SPORTS_KEY}, params={"league": choice['id'], "season": season})
+        res = requests.get(url, headers=headers, params=params)
         json_data = res.json()
-
-        # --- DEBUG: Print the structure if empty ---
+        
         if not json_data.get('response'):
-            print(f"❌ API Error/Empty: {json_data.get('errors')}")
+            print(f"❌ API literally has no data for {choice['name']} in {season}")
             return None
 
-        # API-Sports often wraps standings differently per sport
-        # Hockey: response[0]['league']['standings']
-        # Basketball: response[0]
-        raw_response = json_data['response']
+        # The API usually returns response[0] as a list of 4 divisions
+        all_groups = json_data['response'][0]
         
-        # Try to find the list of teams in the three most common spots
-        standings = None
-        if isinstance(raw_response[0], list): # Flat list
-            standings = raw_response[0]
-        elif 'league' in raw_response[0]: # Hockey style
-            standings = raw_response[0]['league'].get('standings', raw_response[0])
-        else:
-            standings = raw_response[0]
-
-        # Handle Nested Divisions (List of Lists)
-        if isinstance(standings[0], list):
-            for group in standings:
-                # Check the first team's group name
-                group_name = group[0].get('group', {}).get('name', '')
+        # NHL Specific: The response is a list of lists.
+        # We need to find the specific list where 'group' == Target
+        if isinstance(all_groups, list) and isinstance(all_groups[0], list):
+            for group_list in all_groups:
+                # Check the first team in this group to see which division it is
+                group_info = group_list[0].get('group', {})
+                group_name = group_info.get('name', '')
+                
+                # If "Central" is in "NHL | Western Conference | Central Division"
                 if choice['target'].lower() in group_name.lower():
-                    return group
-            return standings[0] # Fallback
+                    print(f"✅ Found match for {choice['target']} in group: {group_name}")
+                    return group_list
             
-        return standings
+            print(f"⚠️ Could not find specific group for {choice['target']}. Falling back to first group.")
+            return all_groups[0]
+
+        return all_groups
     except Exception as e:
-        print(f"⚠️ Fetch logic error: {e}")
+        print(f"⛔ Script stopped: {e}")
         return None
 
 def run():
