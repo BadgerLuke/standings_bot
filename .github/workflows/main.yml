@@ -1,18 +1,28 @@
-name: Sports Bot
+name: Sports Bot Automation
+
 on:
   schedule:
-    - cron: '0 */6 * * *' # Every 6 hours
-  workflow_dispatch:      # Manual trigger button
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
 jobs:
-  run-bot:
+  tweet:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout Code
+        # UPDATED: v4 -> v5 (Supports Node 24)
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        # UPDATED: v5 -> v6 (Supports Node 24)
+        uses: actions/setup-python@v6
         with:
           python-version: '3.10'
-      - run: pip install tweepy requests
-      - name: Execute
+
+      - name: Install Libraries
+        run: pip install tweepy requests
+
+      - name: Run Script
         env:
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
