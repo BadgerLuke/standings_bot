@@ -23,39 +23,45 @@ POOL = [
 def fetch_standings(choice):
     url = f"https://{choice['domain']}.api-sports.io/standings"
     current_year = datetime.datetime.now().year
-    
-    # We try the current year first, then the previous year if current is empty
-    seasons_to_try = [current_year, current_year - 1]
+    # For NHL/NBA in March, 2025 is the 'start' year of the current season
+    seasons_to_try = [current_year - 1, current_year] 
     
     for season in seasons_to_try:
         try:
-            print(f"Checking {choice['name']} for season {season}...")
+            print(f"--- Checking {choice['name']} | Season: {season} ---")
             res = requests.get(url, headers={"x-apisports-key": SPORTS_KEY}, params={"league": choice['id'], "season": season})
             res_data = res.json()
             
-            # CRITICAL FIX: Check if 'response' has data
             if not res_data.get('response'):
+                print(f"Empty response for {season}")
                 continue 
             
+            # The API usually nests standings inside a list
             data = res_data['response'][0]
             standings = data.get('league', {}).get('standings', data)
-            
-            # Handle nested lists (standard for most divisions)
-            if standings and isinstance(standings[0], list):
-                for group in standings:
-                    group_name = group[0].get('group', {}).get('name', '')
-                    if choice['target'].lower() in group_name.lower():
+
+            # --- DIAGNOSTIC PRINT ---
+            # This helps us see what the groups are actually named
+            if isinstance(standings[0], list):
+                print(f"Found {len(standings)} groups in the response.")
+                for idx, group in enumerate(standings):
+                    group_name = group[0].get('group', {}).get('name', 'Unknown')
+                    print(f"Group {idx}: '{group_name}'")
+                    
+                    # Fuzzy match: Checks if "Atlantic" is in "Atlantic Division"
+                    if choice['target'].lower() in group_name.lower() or group_name.lower() in choice['target'].lower():
+                        print(f"✅ Match found: {group_name}")
                         return group
             
+            # If it's not a nested list, just return the whole thing
             if standings:
                 return standings
                 
         except Exception as e:
-            print(f"Skipping {season} due to error: {e}")
+            print(f"Error on {season}: {e}")
             continue
             
     return None
-
 def format_row(sport, t):
     name = t['team']['name']
     if sport == "hockey":
