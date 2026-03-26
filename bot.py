@@ -29,9 +29,9 @@ def get_live_season(domain, league_id):
         for s in data['response'][0]['seasons']:
             if s.get('current') == True:
                 return s['year']
-        return 2026 # Fallback
+        return 2025 # Fallback
     except:
-        return 2025
+        return 2026
 
 def fetch_data(choice):
     season = get_live_season(choice['domain'], choice['id'])
