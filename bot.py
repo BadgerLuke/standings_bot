@@ -16,7 +16,8 @@ SPORTS_KEY = os.getenv("SPORTS_API_KEY")
 POOL = [
     {"name": "Western Conference", "id": 3, "sport": "hockey", "domain": "v1.hockey", "target": "Atlantic"},
     {"name": "Eastern Conference", "id": 3, "sport": "hockey", "domain": "v1.hockey", "target": "Metropolitan"},
-    {"name": "Atlantic", "id": 12, "sport": "nba", "domain": "v1.basketball", "target": "Atlantic"},
+    {"name": "NBA Atlantic", "id": 12, "sport": "nba", "domain": "v1.basketball", "target": "Atlantic"},
+    {"name": "MLS Eastern", "id": 253, "sport": "soccer", "domain": "v3.football", "target": "Eastern"}
 ]
 
 def get_live_season(domain, league_id):
@@ -29,9 +30,9 @@ def get_live_season(domain, league_id):
         for s in data['response'][0]['seasons']:
             if s.get('current') == True:
                 return s['year']
-        return 2026 # Fallback
+        return 2025 # Fallback
     except:
-        return 2026
+        return 2025
 
 def fetch_data(choice):
     season = get_live_season(choice['domain'], choice['id'])
