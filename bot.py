@@ -18,8 +18,6 @@ POOL = [
     {"name": "NHL Metropolitan", "id": 3, "sport": "hockey", "domain": "v1.hockey", "target": "Metropolitan"},
     {"name": "NHL Central", "id": 3, "sport": "hockey", "domain": "v1.hockey", "target": "Central"},
     {"name": "NHL Pacific", "id": 3, "sport": "hockey", "domain": "v1.hockey", "target": "Pacific"},
-    {"name": "NBA Eastern", "id": 12, "sport": "nba", "domain": "v1.basketball", "target": "East"},
-    {"name": "NBA Western", "id": 12, "sport": "nba", "domain": "v1.basketball", "target": "West"}
 ]
 
 def fetch_data(choice):
