@@ -7,23 +7,24 @@ on:
   workflow_dispatch:
 
 jobs:
-  tweet:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
-        # UPDATED: v4 -> v5 (Supports Node 24)
-        uses: actions/checkout@v5
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Setup Python
-        # UPDATED: v5 -> v6 (Supports Node 24)
-        uses: actions/setup-python@v6
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Install Libraries
-        run: pip install tweepy requests
+      # --- THIS IS THE MISSING PIECE ---
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: Run Script
+      - name: Run bot
         env:
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
