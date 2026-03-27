@@ -60,12 +60,15 @@ def fetch_data(choice):
         print(f"⛔ Script stopped: {e}")
         return None
 
+from datetime import datetime
+import pytz # You may need to run 'pip install pytz' or add it to requirements.txt
+
 def run():
     choice = random.choice(POOL)
     data = fetch_data(choice)
     
     if not data:
-        print("⛔ No data could be parsed. Check the ID and Season.")
+        print("⛔ No data could be parsed.")
         return
 
     tweet = f"📊 {choice['name']} Standings\n\n"
@@ -73,7 +76,6 @@ def run():
         name = team['team']['name']
         try:
             if choice['sport'] == "hockey":
-                # NHL v1 Stat Path
                 w = team['games']['win']['total']
                 l = team['games']['lose']['total']
                 ot = team['games']['lose'].get('ot', 0)
@@ -85,11 +87,17 @@ def run():
         except:
             tweet += f"{i}. {name}: Data Pending\n"
 
+    # --- UNIQUE TIMESTAMP LOGIC ---
+    # Get current time in Central Time
+    tz = pytz.timezone('America/Chicago')
+    now = datetime.now(tz).strftime("%I:%M %p CT")
+    
+    tweet += f"\n🕒 Last Updated: {now}"
     tweet += f"\n#SportsData #{choice['sport'].upper()}"
     
     try:
         X_CLIENT.create_tweet(text=tweet)
-        print("🚀 SUCCESS! Posted to X.")
+        print(f"🚀 SUCCESS! Posted unique tweet at {now}")
     except Exception as e:
         print(f"❌ X.com Error: {e}")
 
