@@ -1,18 +1,22 @@
-import tweepy
-import requests
-import random
 import os
+import random
+import requests
+import tweepy
+from datetime import datetime
+import pytz
 
-# --- AUTH ---
+# --- CONFIGURATION ---
 X_CLIENT = tweepy.Client(
-    consumer_key=os.getenv("X_API_KEY"),
-    consumer_secret=os.getenv("X_API_SECRET"),
-    access_token=os.getenv("X_ACCESS_TOKEN"),
-    access_token_secret=os.getenv("X_ACCESS_SECRET")
+    consumer_key=os.environ.get("X_API_KEY"),
+    consumer_secret=os.environ.get("X_API_SECRET"),
+    access_token=os.environ.get("X_ACCESS_TOKEN"),
+    access_token_secret=os.environ.get("X_ACCESS_SECRET")
 )
-SPORTS_KEY = os.getenv("SPORTS_API_KEY")
 
-# Updated Pool with corrected IDs for 2026
+SPORTS_KEY = os.environ.get("SPORTS_API_KEY")
+
+# NHL ID is 57 for API-Sports Hockey v1
+# 'target' must match the API's group name (e.g. "Pacific Division")
 POOL = [
     {"name": "NHL Atlantic", "id": 57, "sport": "hockey", "domain": "v1.hockey", "target": "Atlantic"},
     {"name": "NHL Metropolitan", "id": 57, "sport": "hockey", "domain": "v1.hockey", "target": "Metropolitan"},
@@ -21,83 +25,61 @@ POOL = [
 ]
 
 def fetch_data(choice):
-    season = 2025 
+    season = 2025 # Current 2025-26 Season
     url = f"https://{choice['domain']}.api-sports.io/standings"
     params = {"league": choice['id'], "season": season}
     headers = {"x-apisports-key": SPORTS_KEY}
-    
-    print(f"📡 Requesting: {choice['name']} | League: {choice['id']} | Season: {season}")
     
     try:
         res = requests.get(url, headers=headers, params=params)
         json_data = res.json()
         
-        if not json_data.get('response'):
-            print(f"❌ API literally has no data for {choice['name']} in {season}")
-            return None
-
-        # The API usually returns response[0] as a list of 4 divisions
-        all_groups = json_data['response'][0]
+        # API-Sports NHL response is a list of lists: response[0] contains 4 lists (divisions)
+        all_divisions = json_data.get('response', [[]])[0]
         
-        # NHL Specific: The response is a list of lists.
-        # We need to find the specific list where 'group' == Target
-        if isinstance(all_groups, list) and isinstance(all_groups[0], list):
-            for group_list in all_groups:
-                # Check the first team in this group to see which division it is
-                group_info = group_list[0].get('group', {})
-                group_name = group_info.get('name', '')
-                
-                # If "Central" is in "NHL | Western Conference | Central Division"
-                if choice['target'].lower() in group_name.lower():
-                    print(f"✅ Found match for {choice['target']} in group: {group_name}")
-                    return group_list
-            
-            print(f"⚠️ Could not find specific group for {choice['target']}. Falling back to first group.")
-            return all_groups[0]
-
-        return all_groups
+        # We search specifically for the division matching our target
+        for division in all_divisions:
+            # Check the group name for each division
+            group_name = division[0].get('group', {}).get('name', '')
+            if choice['target'].lower() in group_name.lower():
+                print(f"✅ Found correct teams for {choice['target']}")
+                return division
+        
+        print(f"⚠️ Could not find exact match for {choice['target']}, using first available.")
+        return all_divisions[0]
     except Exception as e:
-        print(f"⛔ Script stopped: {e}")
+        print(f"⛔ Error fetching/parsing: {e}")
         return None
-
-from datetime import datetime
-import pytz # You may need to run 'pip install pytz' or add it to requirements.txt
 
 def run():
     choice = random.choice(POOL)
     data = fetch_data(choice)
     
     if not data:
-        print("⛔ No data could be parsed.")
         return
 
+    # Create the Tweet
     tweet = f"📊 {choice['name']} Standings\n\n"
+    
+    # Sort by rank just in case
+    data.sort(key=lambda x: x.get('position', x.get('rank', 0)))
+
     for i, team in enumerate(data[:5], 1):
         name = team['team']['name']
-        try:
-            if choice['sport'] == "hockey":
-                w = team['games']['win']['total']
-                l = team['games']['lose']['total']
-                ot = team['games']['lose'].get('ot', 0)
-                tweet += f"{i}. {name}: {w}-{l}-{ot} ({team['points']}pts)\n"
-            else:
-                w = team.get('won', team.get('wins', {}).get('total', 0))
-                l = team.get('lost', team.get('losses', {}).get('total', 0))
-                tweet += f"{i}. {name}: {w}-{l}\n"
-        except:
-            tweet += f"{i}. {name}: Data Pending\n"
+        w = team['games']['win']['total']
+        l = team['games']['lose']['total']
+        ot = team['games']['lose'].get('ot', 0)
+        pts = team.get('points', 0)
+        tweet += f"{i}. {name}: {w}-{l}-{ot} ({pts}pts)\n"
 
-    # --- UNIQUE TIMESTAMP LOGIC ---
-    # Get current time in Central Time
+    # Add unique timestamp to avoid "Duplicate Tweet" error
     tz = pytz.timezone('America/Chicago')
     now = datetime.now(tz).strftime("%I:%M %p CT")
-    
-    tweet += f"\n🕒 Last Updated: {now}"
-    tweet += f"\n#SportsData #{choice['sport'].upper()}"
-    
+    tweet += f"\n🕒 Updated: {now}\n#NHL #SportsData"
+
     try:
         X_CLIENT.create_tweet(text=tweet)
-        print(f"🚀 SUCCESS! Posted unique tweet at {now}")
+        print(f"🚀 Posted: {choice['name']} at {now}")
     except Exception as e:
         print(f"❌ X.com Error: {e}")
 
