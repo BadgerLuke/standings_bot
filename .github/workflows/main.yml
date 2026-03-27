@@ -2,30 +2,27 @@ name: Standings Bot
 
 on:
   schedule:
-    # 7:17 AM to 10:17 PM Central Time
     - cron: '17 0-3,12-23 * * *'
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    # We can keep this for safety, but the version updates below do the heavy lifting
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-      
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5  # Updated from v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v6  # Updated from v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.10'
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install tweepy requests pytz
 
       - name: Run bot
         env:
