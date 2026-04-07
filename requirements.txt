@@ -1,3 +1,4 @@
 tweepy
-requests
+google-generativeai
 pytz
+requests
