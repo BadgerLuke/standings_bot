@@ -1,13 +1,14 @@
 import os
 import random
 import tweepy
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from datetime import datetime
 import pytz
 
 # --- API SETUP ---
-# Setup Gemini
-genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
+# Setup New Gemini SDK
+client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
 # Setup X (Twitter)
 X_CLIENT = tweepy.Client(
@@ -17,19 +18,10 @@ X_CLIENT = tweepy.Client(
     access_token_secret=os.environ.get("X_ACCESS_SECRET")
 )
 
-# Initialize the Model with Google Search Grounding
-model = genai.GenerativeModel(
-    model_name='gemini-1.5-flash',
-    tools=[{'google_search': {}}],
-    system_instruction=(
-        "You are a sports data assistant. When asked for standings, "
-        "search for the most current 2025-26 data. Provide ONLY the "
-        "top 5 teams in this exact plain-text format: 'Rank. Team: W-L-OTL (Points)'. "
-        "Do not include any intro, outro, or conversational text."
-    )
-)
+# Configuration for Google Search Grounding
+# Note: In the new SDK, tools are passed in the config
+search_tool = types.Tool(google_search=types.GoogleSearch())
 
-# The divisions we want to cycle through
 POOL = [
     "NHL Central Division", 
     "NHL Pacific Division", 
@@ -39,28 +31,36 @@ POOL = [
 
 def run():
     division = random.choice(POOL)
-    print(f"🤖 Gemini is searching for {division} standings...")
-    
-    prompt = f"Give me the current top 5 standings for the {division}."
+    print(f"🤖 Searching Google for {division}...")
+
+    prompt = (
+        f"Give me the current top 5 standings for the {division} for the 2025-26 season. "
+        "Format exactly as a list: 'Rank. Team: W-L-OTL (Points)'. No intro text."
+    )
     
     try:
-        # Generate content using Google Search
-        response = model.generate_content(prompt)
+        # The new 2026 way to generate grounded content
+        response = client.models.generate_content(
+            model="gemini-2.0-flash", # Using the latest stable 2026 model
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                tools=[search_tool]
+            )
+        )
+        
         standings_text = response.text.strip()
         
-        # Create a unique timestamp for Eden Prairie (Central Time)
+        # Timestamp for Eden Prairie (Central Time)
         tz = pytz.timezone('America/Chicago')
         timestamp = datetime.now(tz).strftime("%I:%M %p CT")
         
-        # Construct the tweet
-        tweet = f"📊 {division} Standings\n\n{standings_text}\n\n🕒 Updated: {timestamp}\n#NHL #Hockey"
+        tweet = f"📊 {division} Standings\n\n{standings_text}\n\n🕒 Updated: {timestamp}\n#NHL"
         
-        # Post to X
         X_CLIENT.create_tweet(text=tweet)
-        print(f"🚀 Successfully posted to X at {timestamp}")
+        print(f"🚀 Posted {division} successfully.")
         
     except Exception as e:
-        print(f"❌ Error occurred: {e}")
+        print(f"❌ Error: {e}")
 
 if __name__ == "__main__":
     run()
