@@ -1,33 +1,4 @@
-import os
-import random
-import tweepy
-from google import genai
-from google.genai import types
-from datetime import datetime
-import pytz
-
-# --- API SETUP ---
-# Setup New Gemini SDK
-client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
-
-# Setup X (Twitter)
-X_CLIENT = tweepy.Client(
-    consumer_key=os.environ.get("X_API_KEY"),
-    consumer_secret=os.environ.get("X_API_SECRET"),
-    access_token=os.environ.get("X_ACCESS_TOKEN"),
-    access_token_secret=os.environ.get("X_ACCESS_SECRET")
-)
-
-# Configuration for Google Search Grounding
-# Note: In the new SDK, tools are passed in the config
-search_tool = types.Tool(google_search=types.GoogleSearch())
-
-POOL = [
-    "NHL Central Division", 
-    "NHL Pacific Division", 
-    "NHL Atlantic Division", 
-    "NHL Metropolitan Division"
-]
+# --- UPDATE THIS SECTION IN bot.py ---
 
 def run():
     division = random.choice(POOL)
@@ -39,18 +10,23 @@ def run():
     )
     
     try:
-        # The new 2026 way to generate grounded content
+        # CHANGED: model="gemini-1.5-flash" (The stable free-tier workhorse)
         response = client.models.generate_content(
-            model="gemini-2.0-flash", # Using the latest stable 2026 model
+            model="gemini-1.5-flash", 
             contents=prompt,
             config=types.GenerateContentConfig(
                 tools=[search_tool]
             )
         )
         
+        # Check if the response actually has text (sometimes safety filters block sports data)
+        if not response.text:
+            print("⚠️ Gemini returned an empty response. Likely a safety filter trigger.")
+            return
+
         standings_text = response.text.strip()
         
-        # Timestamp for Eden Prairie (Central Time)
+        # Timestamp logic...
         tz = pytz.timezone('America/Chicago')
         timestamp = datetime.now(tz).strftime("%I:%M %p CT")
         
@@ -60,7 +36,5 @@ def run():
         print(f"🚀 Posted {division} successfully.")
         
     except Exception as e:
+        # If it still says 429, it means your "Search" tool is blocked on the anonymous tier
         print(f"❌ Error: {e}")
-
-if __name__ == "__main__":
-    run()
