@@ -2,7 +2,6 @@ name: Sports Bot
 
 on:
   schedule:
-    # Runs every hour from 7:17 AM to 10:17 PM Central Time
     - cron: '17 0-3,12-23 * * *'
   workflow_dispatch:
 
@@ -18,7 +17,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: '3.10'
+          python-version: '3.11' # Upgraded to fix deprecation warning
 
       - name: Install dependencies
         run: |
