@@ -16,7 +16,7 @@ X_CLIENT = tweepy.Client(
     access_token_secret=os.environ.get("X_ACCESS_SECRET")
 )
 
-# Search Tool Configuration (Required for Live Standings)
+# Current 2026 search tool configuration
 search_tool = types.Tool(google_search=types.GoogleSearch())
 
 POOL = [
@@ -28,45 +28,47 @@ POOL = [
 
 def run():
     division = random.choice(POOL)
-    print(f"🤖 Searching Google for {division} standings...")
+    print(f"🤖 Processing {division}...")
 
-    # Force Gemini to be concise to fit within X.com character limits
     prompt = (
         f"Provide the current top 5 standings for the {division} for the 2025-26 season. "
-        "Format exactly as a list: 'Rank. Team: W-L-OTL (Points)'. "
-        "Do not include any intro, outro, or conversational text."
+        "Format exactly as: 'Rank. Team: W-L-OTL (Points)'. "
+        "No intro text. Be concise."
     )
     
     try:
-        # Using the current 2026 standard model
+        # ATTEMPT 1: Search Grounded (Requires the 'Switch' to be on in AI Studio)
+        print("🔍 Attempting grounded search...")
         response = client.models.generate_content(
-            model="gemini-3-flash-preview", 
+            model="gemini-1.5-flash", # Use the stable LTS model
             contents=prompt,
-            config=types.GenerateContentConfig(
-                tools=[search_tool]
-            )
+            config=types.GenerateContentConfig(tools=[search_tool])
         )
-        
-        if not response.text:
-            print("⚠️ Response was empty. Check if billing/verification is required for Search.")
-            return
-
-        standings_text = response.text.strip()
-        
-        # Local Timestamp (Central Time)
-        tz = pytz.timezone('America/Chicago')
-        timestamp = datetime.now(tz).strftime("%I:%M %p CT")
-        
-        # Build Tweet
-        tweet = f"📊 {division} Standings\n\n{standings_text}\n\n🕒 Updated: {timestamp}\n#NHL #HockeyBot"
-        
-        X_CLIENT.create_tweet(text=tweet)
-        print(f"🚀 Successfully posted {division} at {timestamp}")
-        
     except Exception as e:
-        print(f"❌ Error: {e}")
-        if "RESOURCE_EXHAUSTED" in str(e):
-            print("💡 ACTION REQUIRED: You must link a Billing Account in AI Studio to use Google Search.")
+        # ATTEMPT 2: Fallback (Internal Knowledge) if 403/429 occurs
+        print(f"⚠️ Search failed ({e}). Falling back to internal memory...")
+        response = client.models.generate_content(
+            model="gemini-1.5-flash",
+            contents=prompt + " (Use your internal data if search is unavailable.)"
+        )
+    
+    try:
+        if response.text:
+            standings_text = response.text.strip()
+            
+            # Timestamp (Eden Prairie / Central Time)
+            tz = pytz.timezone('America/Chicago')
+            timestamp = datetime.now(tz).strftime("%I:%M %p CT")
+            
+            tweet = f"📊 {division} Standings\n\n{standings_text}\n\n🕒 Updated: {timestamp}\n#NHL"
+            
+            X_CLIENT.create_tweet(text=tweet)
+            print(f"🚀 Success! Posted {division}.")
+        else:
+            print("❌ No content generated.")
+
+    except Exception as post_error:
+        print(f"❌ Final error: {post_error}")
 
 if __name__ == "__main__":
     run()
