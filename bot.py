@@ -7,8 +7,10 @@ from datetime import datetime
 import pytz
 
 # --- API SETUP ---
+# Initialize the Gemini Client
 client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
+# Initialize X (Twitter) Client
 X_CLIENT = tweepy.Client(
     consumer_key=os.environ.get("X_API_KEY"),
     consumer_secret=os.environ.get("X_API_SECRET"),
@@ -16,7 +18,7 @@ X_CLIENT = tweepy.Client(
     access_token_secret=os.environ.get("X_ACCESS_SECRET")
 )
 
-# Tool for Google Search Grounding
+# Configuration for Google Search Grounding (April 2026 Syntax)
 search_tool = types.Tool(google_search=types.GoogleSearch())
 
 POOL = [
@@ -28,46 +30,43 @@ POOL = [
 
 def run():
     division = random.choice(POOL)
-    print(f"🤖 Searching Google for {division} standings...")
+    print(f"🤖 Searching Google for {division}...")
 
     prompt = (
-        f"Give me the current top 5 standings for the {division} for the 2025-26 season. "
-        "Format exactly as a list: 'Rank. Team: W-L-OTL (Points)'. No intro or outro text."
+        f"Provide the current top 5 standings for the {division} for the 2025-26 season. "
+        "Format exactly as a list: 'Rank. Team: W-L-OTL (Points)'. No conversational intro."
     )
     
-    # We will try the newest Gemini 3 model first
-    # If it fails, we fall back to the stable Gemini 2.5
-    models_to_try = ["gemini-3-flash-preview", "gemini-2.5-flash"]
-    
-    for model_name in models_to_try:
-        try:
-            print(f"✨ Attempting with {model_name}...")
-            response = client.models.generate_content(
-                model=model_name, 
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    tools=[search_tool]
-                )
+    try:
+        # Use 'gemini-2.0-flash' - It's the stable workhorse until June 2026
+        # It's less likely to trigger the "Limit: 0" error than the Preview models
+        response = client.models.generate_content(
+            model="gemini-2.0-flash", 
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                tools=[search_tool]
             )
-            
-            if response.text:
-                standings_text = response.text.strip()
-                
-                # Timestamp for Eden Prairie (Central Time)
-                tz = pytz.timezone('America/Chicago')
-                timestamp = datetime.now(tz).strftime("%I:%M %p CT")
-                
-                tweet = f"📊 {division} Standings\n\n{standings_text}\n\n🕒 Updated: {timestamp}\n#NHL"
-                
-                X_CLIENT.create_tweet(text=tweet)
-                print(f"🚀 Successfully posted {division} via {model_name}.")
-                return # Exit once successful
-            
-        except Exception as e:
-            print(f"⚠️ {model_name} failed: {e}")
-            continue # Try the next model in the list
+        )
+        
+        if not response.text:
+            print("⚠️ No text returned. The Search Grounding might be blocked or safety-filtered.")
+            return
 
-    print("❌ All models failed to generate content.")
+        standings_text = response.text.strip()
+        
+        # Local Timestamp for Eden Prairie (Central Time)
+        tz = pytz.timezone('America/Chicago')
+        timestamp = datetime.now(tz).strftime("%I:%M %p CT")
+        
+        tweet = f"📊 {division} Standings\n\n{standings_text}\n\n🕒 Updated: {timestamp}\n#NHL"
+        
+        # Post to X
+        X_CLIENT.create_tweet(text=tweet)
+        print(f"🚀 Success! Posted {division} standings.")
+        
+    except Exception as e:
+        print(f"❌ Critical Error: {e}")
+        print("💡 TIP: If you see 'Limit: 0', you MUST link a billing account in AI Studio to verify your project.")
 
 if __name__ == "__main__":
     run()
