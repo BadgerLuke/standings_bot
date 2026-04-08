@@ -7,7 +7,6 @@ from datetime import datetime
 import pytz
 
 # --- API SETUP ---
-# The new SDK automatically picks up GEMINI_API_KEY from environment variables
 client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
 X_CLIENT = tweepy.Client(
@@ -17,10 +16,8 @@ X_CLIENT = tweepy.Client(
     access_token_secret=os.environ.get("X_ACCESS_SECRET")
 )
 
-# Current Search Tool for 2026
 search_tool = types.Tool(google_search=types.GoogleSearch())
-
-# The official stable model for 2026
+# Using the stable 2026 workhorse model
 CURRENT_MODEL = "gemini-2.5-flash"
 
 POOL = [
@@ -35,31 +32,37 @@ def run():
     target = random.choice(POOL)
     print(f"🤖 Processing {target}...")
 
+    # We use a more "journalistic" prompt to avoid safety triggers
     prompt = (
-        f"List the current top 5 standings for {target}. "
+        f"Act as a sports data journalist. Provide a neutral report of the top 5 standings for {target}. "
         "Format: 'Rank. Team: Record (Pts/GB)'. "
-        "No intro. No conversational filler. Just the list."
+        "Provide only the list data. Today is April 8, 2026."
     )
     
+    # NEW: Safety Overrides (Required for sports content in 2026)
+    safety_settings = [
+        types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="BLOCK_NONE"),
+        types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_NONE"),
+        types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_NONE"),
+        types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_NONE"),
+    ]
+
     response = None
     try:
         print(f"🔍 Fetching data with {CURRENT_MODEL}...")
         response = client.models.generate_content(
             model=CURRENT_MODEL,
             contents=prompt,
-            config=types.GenerateContentConfig(tools=[search_tool])
+            config=types.GenerateContentConfig(
+                tools=[search_tool],
+                safety_settings=safety_settings
+            )
         )
     except Exception as e:
-        print(f"⚠️ Search failed: {e}. Trying internal memory fallback...")
-        try:
-            response = client.models.generate_content(
-                model=CURRENT_MODEL,
-                contents=prompt + " (Use internal knowledge)."
-            )
-        except Exception as e2:
-            print(f"❌ Both attempts failed: {e2}")
-            return
+        print(f"⚠️ API Exception: {e}")
+        return
 
+    # Debugging the response structure
     if response and response.text:
         try:
             standings_text = response.text.strip()
@@ -70,12 +73,17 @@ def run():
             tweet_text = f"📊 {target} Standings\n\n{standings_text}\n\n🕒 {timestamp}\n#{league_tag} #SportsUpdates"
             
             X_CLIENT.create_tweet(text=tweet_text, user_auth=True)
-            print(f"🚀 Success! Posted {target} to X.")
+            print(f"🚀 Success! Posted to X.")
             
         except Exception as post_err:
             print(f"❌ X API Error: {post_err}")
     else:
-        print("❌ Model returned no text content.")
+        # Check if it was blocked by safety
+        if hasattr(response, 'candidates') and response.candidates:
+            reason = response.candidates[0].finish_reason
+            print(f"❌ Generation Blocked. Reason: {reason}")
+        else:
+            print("❌ Absolute empty response. This may be a temporary Google API outage.")
 
 if __name__ == "__main__":
     run()
