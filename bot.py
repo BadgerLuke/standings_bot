@@ -18,11 +18,11 @@ X_CLIENT = tweepy.Client(
 )
 
 search_tool = types.Tool(google_search=types.GoogleSearch())
+# Alias for the latest stable model
+CURRENT_MODEL = "gemini-2.0-flash-001" 
 
-# This is the current "Latest" stable alias for April 2026
-LATEST_MODEL = "gemini-2.0-flash-001" 
-
-POOL = [
+# Full list of all potential targets
+ALL_DIVISIONS = [
     "NHL Central Division", "NHL Pacific Division", "NHL Atlantic Division", "NHL Metropolitan Division",
     "NBA Atlantic Division", "NBA Central Division", "NBA Southeast Division", "NBA Northwest Division", "NBA Pacific Division", "NBA Southwest Division",
     "MLB AL East", "MLB AL Central", "MLB AL West", "MLB NL East", "MLB NL Central", "MLB NL West",
@@ -30,71 +30,93 @@ POOL = [
     "NFL AFC East", "NFL AFC North", "NFL AFC South", "NFL AFC West", "NFL NFC East", "NFL NFC North", "NFL NFC South", "NFL NFC West"
 ]
 
+def get_active_pool(current_month):
+    """Filters divisions based on whether the league is in regular season."""
+    active = []
+    for item in ALL_DIVISIONS:
+        # NFL: Active Sept (9) thru Jan (1)
+        if "NFL" in item:
+            if current_month in [9, 10, 11, 12, 1]:
+                active.append(item)
+        # MLB: Active April (4) thru Sept (9)
+        elif "MLB" in item:
+            if 4 <= current_month <= 9:
+                active.append(item)
+        # NBA/NHL: Active Oct (10) thru April (4)
+        elif "NBA" in item or "NHL" in item:
+            if current_month >= 10 or current_month <= 4:
+                active.append(item)
+        # MLS: Active Feb (2) thru Oct (10)
+        elif "MLS" in item:
+            if 2 <= current_month <= 10:
+                active.append(item)
+    return active
+
 def run():
-    target = random.choice(POOL)
     tz = pytz.timezone('America/Chicago')
     now = datetime.now(tz)
+    current_month = now.month
     date_label = now.strftime("%B %d, 2026")
-    timestamp_label = now.strftime("%I:%M %p CT")
     
-    print(f"🤖 Processing {target} for {date_label}...")
+    # Get only active leagues for the current date
+    active_pool = get_active_pool(current_month)
+    
+    if not active_pool:
+        print("⏸️ No leagues are currently in regular season. Skipping post.")
+        return
+
+    target = random.choice(active_pool)
+    print(f"🤖 Selected Active Target: {target}")
 
     season_term = "2026 season" if any(x in target for x in ["MLB", "MLS"]) else "2025-26 season"
+    
     prompt = (
-        f"Provide the current top 5 standings for the {target} {season_term}. "
+        f"Retrieve the current standings for the {target} {season_term}. "
         f"Today is {date_label}. Use Google Search. "
-        "Format: Rank. Team: Record (Pts/GB). List only. No intro text."
+        "Format the top 5 teams as: Rank. Team: Record. "
+        "Direct data only. No intro, no conversational filler."
     )
 
-    # --- AUTO-HEALING MODEL SELECTION ---
-    # We try our preferred model, but if it fails, we ask the API what IS available.
     try:
-        model_to_use = LATEST_MODEL
-        print(f"🔍 Attempting Search with {model_to_use}...")
         response = client.models.generate_content(
-            model=model_to_use,
+            model=CURRENT_MODEL,
             contents=prompt,
             config=types.GenerateContentConfig(tools=[search_tool])
         )
-    except Exception as e:
-        print(f"⚠️ {model_to_use} failed. Searching for an alternative model...")
-        try:
-            # Dynamically find ANY flash model available to your key
-            available_models = [m.name for m in client.models.list() if "flash" in m.name]
-            model_to_use = available_models[0] if available_models else "gemini-1.5-flash"
-            print(f"🔄 Switching to {model_to_use}...")
-            response = client.models.generate_content(
-                model=model_to_use,
-                contents=prompt,
-                config=types.GenerateContentConfig(tools=[search_tool])
-            )
-        except Exception as e2:
-            print(f"❌ Critical Error: No models available. {e2}")
-            return
-
-    # --- POSTING LOGIC ---
-    if response and response.text:
-        clean_standings = re.sub(r'\[\d+\]', '', response.text.strip())
         
-        # Guard against AI "Refusal" lectures
-        if "speculative" in clean_standings.lower() or "cannot predict" in clean_standings.lower():
-            print("❌ Refusal detected. Bot won't post garbage.")
+        text = response.text or ""
+        # Check for AI 'Refusals'
+        if any(x in text.lower() for x in ["speculative", "cannot provide", "not yet begun"]):
+             raise ValueError("Model gave a refusal disclaimer.")
+
+    except Exception:
+        print("🔄 Primary search failed. Using blunt fallback...")
+        response = client.models.generate_content(
+            model=CURRENT_MODEL,
+            contents=f"Top 5 {target} standings {season_term}. List only. No sentences."
+        )
+
+    if response and response.text:
+        clean_text = re.sub(r'\[\d+\]', '', response.text.strip())
+        
+        # Final gate to keep the bot professional
+        if "speculative" in clean_text.lower() or "ai" in clean_text.lower():
+            print("❌ Failure: Model provided conversational text instead of data.")
             return
 
         league_tag = target.split(' ')[0]
-        tweet_text = f"📊 {target} Standings\n({date_label})\n\n{clean_standings}\n\n🕒 {timestamp_label}\n#{league_tag} #Sports"
+        tweet_text = f"📊 {target} Standings\n({date_label})\n\n{clean_text}\n\n🕒 {now.strftime('%I:%M %p CT')}\n#{league_tag} #Sports"
         
         if len(tweet_text) > 280:
             tweet_text = tweet_text[:277] + "..."
 
         try:
-            print(f"🐦 Posting to X...")
             X_CLIENT.create_tweet(text=tweet_text, user_auth=True)
-            print("🚀 SUCCESS!")
+            print(f"🚀 SUCCESS! Posted {target} standings.")
         except Exception as x_err:
             print(f"❌ X API Error: {x_err}")
     else:
-        print("❌ Model returned no text.")
+        print("❌ Final response was empty.")
 
 if __name__ == "__main__":
     run()
