@@ -10,6 +10,7 @@ import re
 # --- API SETUP ---
 client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
+# Ensure these match your REGENERATED tokens after setting App to Read/Write
 X_CLIENT = tweepy.Client(
     consumer_key=os.environ.get("X_API_KEY"),
     consumer_secret=os.environ.get("X_API_SECRET"),
@@ -32,67 +33,62 @@ def run():
     target = random.choice(POOL)
     print(f"🤖 Processing {target}...")
 
-    # Determine the correct season terminology for the specific sport
-    if "MLB" in target or "MLS" in target:
-        season_term = "current 2026 season"
-    else:
-        season_term = "current 2025-26 season"
+    # Dynamic season logic
+    season_term = "current 2026 season" if any(x in target for x in ["MLB", "MLS"]) else "2025-26 season"
 
-    # Use a prompt that demands factual data to bypass "future speculation" guardrails
     prompt = (
-        f"Retrieve the official standings for the {target} for the {season_term}. "
-        "List only the top 5 teams. Format: 'Rank. Team: Record (Pts/GB)'. "
-        "Do not include any commentary about unpredictability or speculative outcomes."
+        f"Official top 5 standings for {target} {season_term}. "
+        "Format: Rank. Team: Record. "
+        "Strictly data only. No intro, no warnings, no future speculation."
     )
     
-    safety_settings = [
-        types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="BLOCK_NONE"),
-        types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_NONE"),
-        types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_NONE"),
-        types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_NONE"),
-    ]
+    # Standard safety for sports
+    safety = [types.SafetySetting(category=c, threshold="BLOCK_NONE") for c in ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH", "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"]]
 
-    response = None
     try:
-        print(f"🔍 Grounded Search for {season_term}...")
+        print(f"🔍 Fetching {target}...")
         response = client.models.generate_content(
             model=CURRENT_MODEL,
             contents=prompt,
-            config=types.GenerateContentConfig(
-                tools=[search_tool],
-                safety_settings=safety_settings
-            )
+            config=types.GenerateContentConfig(tools=[search_tool], safety_settings=safety)
         )
-        # Force a failure if the AI gives a refusal message instead of a list
-        if not response.text or "speculative" in response.text.lower() or "cannot provide" in response.text.lower():
-            raise ValueError("Model refused to provide data or returned empty.")
-            
-    except Exception as e:
-        print(f"⚠️ Attempt 1 failed: {e}. Trying Fallback...")
-        # Fallback uses a more direct command
+        
+        # Check if the AI lectured us or failed
+        text = response.text or ""
+        if "speculative" in text.lower() or "cannot provide" in text.lower() or len(text) < 10:
+             raise ValueError("Bad response content")
+
+    except:
+        print("⚠️ Search failed/refused. Using internal fallback...")
         response = client.models.generate_content(
             model=CURRENT_MODEL,
-            contents=f"Standing list for {target} {season_term}. Format: Team (Record). No intro.",
-            config=types.GenerateContentConfig(safety_settings=safety_settings)
+            contents=f"Top 5 {target} teams and records as of April 2026. No intro.",
+            config=types.GenerateContentConfig(safety_settings=safety)
         )
 
     if response and response.text:
+        # 1. Clean citations
+        clean_text = re.sub(r'\[\d+\]', '', response.text.strip())
+        
+        # 2. Build Tweet
+        tz = pytz.timezone('America/Chicago')
+        timestamp = datetime.now(tz).strftime("%I:%M %p CT")
+        league_tag = target.split(' ')[0]
+        tweet_text = f"📊 {target}:\n\n{clean_text}\n\n🕒 {timestamp}\n#{league_tag} #Standings"
+        
+        # 3. Final Length Safety (X limit is 280)
+        if len(tweet_text) > 270:
+            tweet_text = tweet_text[:267] + "..."
+
         try:
-            standings_text = re.sub(r'\[\d+\]', '', response.text.strip())
-            tz = pytz.timezone('America/Chicago')
-            timestamp = datetime.now(tz).strftime("%I:%M %p CT")
-            
-            league_tag = target.split(' ')[0]
-            tweet_text = f"📊 {target} Standings\n\n{standings_text}\n\n🕒 {timestamp}\n#{league_tag} #Sports"
-            
-            print(f"🐦 Posting to X...")
+            print(f"🐦 Posting:\n{tweet_text}")
             X_CLIENT.create_tweet(text=tweet_text, user_auth=True)
-            print(f"🚀 Success!")
-            
-        except Exception as post_err:
-            print(f"❌ X API Error: {post_err}")
+            print("🚀 SUCCESS!")
+        except Exception as x_err:
+            print(f"❌ X API Error: {x_err}")
+            print("💡 TIP: Check if your X App is set to 'Read and Write' in the Dev Portal.")
     else:
-        print("❌ Critical: Failed to get data.")
+        print("❌ No text generated.")
 
 if __name__ == "__main__":
     run()
