@@ -2,7 +2,7 @@ name: Sports Bot
 
 on:
   schedule:
-    - cron: '17 * * * *'
+    - cron: '17 11-23,0-5 * * *'
   workflow_dispatch:
 
 jobs:
