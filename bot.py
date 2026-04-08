@@ -5,6 +5,7 @@ from google import genai
 from google.genai import types
 from datetime import datetime
 import pytz
+import re
 
 # --- API SETUP ---
 client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
@@ -31,10 +32,17 @@ def run():
     target = random.choice(POOL)
     print(f"🤖 Processing {target}...")
 
+    # Determine the correct season terminology for the specific sport
+    if "MLB" in target or "MLS" in target:
+        season_term = "current 2026 season"
+    else:
+        season_term = "current 2025-26 season"
+
+    # Use a prompt that demands factual data to bypass "future speculation" guardrails
     prompt = (
-        f"Search for the current top 5 standings of the {target} for the 2025-26 season. "
-        "Return ONLY a list in this format: 'Rank. Team: Record (Pts/GB)'. "
-        "Do not include any other text, analysis, or citations."
+        f"Retrieve the official standings for the {target} for the {season_term}. "
+        "List only the top 5 teams. Format: 'Rank. Team: Record (Pts/GB)'. "
+        "Do not include any commentary about unpredictability or speculative outcomes."
     )
     
     safety_settings = [
@@ -46,7 +54,7 @@ def run():
 
     response = None
     try:
-        print(f"🔍 Attempt 1: Grounded Search...")
+        print(f"🔍 Grounded Search for {season_term}...")
         response = client.models.generate_content(
             model=CURRENT_MODEL,
             contents=prompt,
@@ -55,27 +63,22 @@ def run():
                 safety_settings=safety_settings
             )
         )
-        
-        # If Attempt 1 returned nothing, trigger the fallback immediately
-        if not response.text:
-            raise ValueError("Empty response text")
+        # Force a failure if the AI gives a refusal message instead of a list
+        if not response.text or "speculative" in response.text.lower() or "cannot provide" in response.text.lower():
+            raise ValueError("Model refused to provide data or returned empty.")
             
     except Exception as e:
-        print(f"⚠️ Attempt 1 failed or empty ({e}). Switching to Fallback...")
+        print(f"⚠️ Attempt 1 failed: {e}. Trying Fallback...")
+        # Fallback uses a more direct command
         response = client.models.generate_content(
             model=CURRENT_MODEL,
-            contents=f"Provide the 2025-26 standings for {target}. Format as a list. No intro.",
+            contents=f"Standing list for {target} {season_term}. Format: Team (Record). No intro.",
             config=types.GenerateContentConfig(safety_settings=safety_settings)
         )
 
     if response and response.text:
         try:
-            standings_text = response.text.strip()
-            
-            # If the model still gave us citations [1], [2], clean them out for X
-            import re
-            standings_text = re.sub(r'\[\d+\]', '', standings_text)
-            
+            standings_text = re.sub(r'\[\d+\]', '', response.text.strip())
             tz = pytz.timezone('America/Chicago')
             timestamp = datetime.now(tz).strftime("%I:%M %p CT")
             
@@ -89,7 +92,7 @@ def run():
         except Exception as post_err:
             print(f"❌ X API Error: {post_err}")
     else:
-        print("❌ Critical: Both attempts returned no content.")
+        print("❌ Critical: Failed to get data.")
 
 if __name__ == "__main__":
     run()
