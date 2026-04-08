@@ -18,7 +18,9 @@ X_CLIENT = tweepy.Client(
 )
 
 search_tool = types.Tool(google_search=types.GoogleSearch())
-CURRENT_MODEL = "gemini-2.0-flash" # Reverting to the most stable 2026 ID
+
+# This is the current "Latest" stable alias for April 2026
+LATEST_MODEL = "gemini-2.0-flash-001" 
 
 POOL = [
     "NHL Central Division", "NHL Pacific Division", "NHL Atlantic Division", "NHL Metropolitan Division",
@@ -30,8 +32,6 @@ POOL = [
 
 def run():
     target = random.choice(POOL)
-    
-    # Clean Date Logic
     tz = pytz.timezone('America/Chicago')
     now = datetime.now(tz)
     date_label = now.strftime("%B %d, 2026")
@@ -40,56 +40,50 @@ def run():
     print(f"🤖 Processing {target} for {date_label}...")
 
     season_term = "2026 season" if any(x in target for x in ["MLB", "MLS"]) else "2025-26 season"
-
-    # Stage 1: Attempt Grounded Search
     prompt = (
         f"Provide the current top 5 standings for the {target} {season_term}. "
         f"Today is {date_label}. Use Google Search. "
         "Format: Rank. Team: Record (Pts/GB). List only. No intro text."
     )
-    
-    response_text = None
-    
+
+    # --- AUTO-HEALING MODEL SELECTION ---
+    # We try our preferred model, but if it fails, we ask the API what IS available.
     try:
-        print("🔍 Attempting Grounded Search...")
+        model_to_use = LATEST_MODEL
+        print(f"🔍 Attempting Search with {model_to_use}...")
         response = client.models.generate_content(
-            model=CURRENT_MODEL,
+            model=model_to_use,
             contents=prompt,
             config=types.GenerateContentConfig(tools=[search_tool])
         )
-        if response.text and "Rank." in response.text:
-            response_text = response.text
     except Exception as e:
-        print(f"⚠️ Search failed: {e}")
-
-    # Stage 2: Fallback to Internal Knowledge if Stage 1 failed
-    if not response_text:
-        print("🔄 Falling back to internal knowledge...")
+        print(f"⚠️ {model_to_use} failed. Searching for an alternative model...")
         try:
-            fallback_prompt = f"List the top 5 teams in the {target} as of early April 2026. Format: Team (Record). No intro."
+            # Dynamically find ANY flash model available to your key
+            available_models = [m.name for m in client.models.list() if "flash" in m.name]
+            model_to_use = available_models[0] if available_models else "gemini-1.5-flash"
+            print(f"🔄 Switching to {model_to_use}...")
             response = client.models.generate_content(
-                model=CURRENT_MODEL,
-                contents=fallback_prompt
+                model=model_to_use,
+                contents=prompt,
+                config=types.GenerateContentConfig(tools=[search_tool])
             )
-            response_text = response.text
         except Exception as e2:
-            print(f"❌ Critical Error: Fallback also failed: {e2}")
+            print(f"❌ Critical Error: No models available. {e2}")
             return
 
-    # Post Processing & Tweeting
-    if response_text:
-        # Clean up citation markers like [1], [2]
-        clean_standings = re.sub(r'\[\d+\]', '', response_text.strip())
+    # --- POSTING LOGIC ---
+    if response and response.text:
+        clean_standings = re.sub(r'\[\d+\]', '', response.text.strip())
         
-        # Guard against the "As an AI..." lecture
+        # Guard against AI "Refusal" lectures
         if "speculative" in clean_standings.lower() or "cannot predict" in clean_standings.lower():
-            print("❌ Refusal detected in response. Aborting post.")
+            print("❌ Refusal detected. Bot won't post garbage.")
             return
 
         league_tag = target.split(' ')[0]
         tweet_text = f"📊 {target} Standings\n({date_label})\n\n{clean_standings}\n\n🕒 {timestamp_label}\n#{league_tag} #Sports"
         
-        # X character limit safety
         if len(tweet_text) > 280:
             tweet_text = tweet_text[:277] + "..."
 
@@ -100,7 +94,7 @@ def run():
         except Exception as x_err:
             print(f"❌ X API Error: {x_err}")
     else:
-        print("❌ Final response was empty.")
+        print("❌ Model returned no text.")
 
 if __name__ == "__main__":
     run()
