@@ -17,11 +17,9 @@ X_CLIENT = tweepy.Client(
     access_token_secret=os.environ.get("X_ACCESS_SECRET")
 )
 
-search_tool = types.Tool(google_search=types.GoogleSearch())
-# Alias for the latest stable model
-CURRENT_MODEL = "gemini-2.0-flash-001" 
+# Use the base stable string
+MODEL_ID = "gemini-2.0-flash"
 
-# Full list of all potential targets
 ALL_DIVISIONS = [
     "NHL Central Division", "NHL Pacific Division", "NHL Atlantic Division", "NHL Metropolitan Division",
     "NBA Atlantic Division", "NBA Central Division", "NBA Southeast Division", "NBA Northwest Division", "NBA Pacific Division", "NBA Southwest Division",
@@ -31,77 +29,62 @@ ALL_DIVISIONS = [
 ]
 
 def get_active_pool(current_month):
-    """Filters divisions based on whether the league is in regular season."""
     active = []
     for item in ALL_DIVISIONS:
-        # NFL: Active Sept (9) thru Jan (1)
         if "NFL" in item:
-            if current_month in [9, 10, 11, 12, 1]:
-                active.append(item)
-        # MLB: Active April (4) thru Sept (9)
+            if current_month in [9, 10, 11, 12, 1]: active.append(item)
         elif "MLB" in item:
-            if 4 <= current_month <= 9:
-                active.append(item)
-        # NBA/NHL: Active Oct (10) thru April (4)
+            if 4 <= current_month <= 9: active.append(item)
         elif "NBA" in item or "NHL" in item:
-            if current_month >= 10 or current_month <= 4:
-                active.append(item)
-        # MLS: Active Feb (2) thru Oct (10)
+            if current_month >= 10 or current_month <= 4: active.append(item)
         elif "MLS" in item:
-            if 2 <= current_month <= 10:
-                active.append(item)
+            if 2 <= current_month <= 10: active.append(item)
     return active
 
 def run():
     tz = pytz.timezone('America/Chicago')
     now = datetime.now(tz)
-    current_month = now.month
     date_label = now.strftime("%B %d, 2026")
-    
-    # Get only active leagues for the current date
-    active_pool = get_active_pool(current_month)
+    active_pool = get_active_pool(now.month)
     
     if not active_pool:
-        print("⏸️ No leagues are currently in regular season. Skipping post.")
+        print("⏸️ Offseason for all tracked leagues.")
         return
 
     target = random.choice(active_pool)
-    print(f"🤖 Selected Active Target: {target}")
+    print(f"🤖 Target: {target}")
 
-    season_term = "2026 season" if any(x in target for x in ["MLB", "MLS"]) else "2025-26 season"
+    season = "2026" if any(x in target for x in ["MLB", "MLS"]) else "2025-26"
+    prompt = (f"Current top 5 standings for {target} {season}. Today is {date_label}. "
+              "Use Google Search. Format: Rank. Team: Record. No intro.")
+
+    # List of models to try in order of preference
+    # We use a loop so if one 404s, we move to the next without crashing
+    potential_models = [MODEL_ID, "gemini-1.5-flash", "gemini-2.0-flash-exp"]
     
-    prompt = (
-        f"Retrieve the current standings for the {target} {season_term}. "
-        f"Today is {date_label}. Use Google Search. "
-        "Format the top 5 teams as: Rank. Team: Record. "
-        "Direct data only. No intro, no conversational filler."
-    )
-
-    try:
-        response = client.models.generate_content(
-            model=CURRENT_MODEL,
-            contents=prompt,
-            config=types.GenerateContentConfig(tools=[search_tool])
-        )
-        
-        text = response.text or ""
-        # Check for AI 'Refusals'
-        if any(x in text.lower() for x in ["speculative", "cannot provide", "not yet begun"]):
-             raise ValueError("Model gave a refusal disclaimer.")
-
-    except Exception:
-        print("🔄 Primary search failed. Using blunt fallback...")
-        response = client.models.generate_content(
-            model=CURRENT_MODEL,
-            contents=f"Top 5 {target} standings {season_term}. List only. No sentences."
-        )
+    response = None
+    for model_name in potential_models:
+        try:
+            print(f"🔍 Attempting {model_name}...")
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())])
+            )
+            if response.text:
+                print(f"✅ Success with {model_name}")
+                break
+        except Exception as e:
+            print(f"⚠️ {model_name} failed: {e}")
+            continue
 
     if response and response.text:
+        # Clean response and format tweet
         clean_text = re.sub(r'\[\d+\]', '', response.text.strip())
         
-        # Final gate to keep the bot professional
-        if "speculative" in clean_text.lower() or "ai" in clean_text.lower():
-            print("❌ Failure: Model provided conversational text instead of data.")
+        # Guard against AI lectures
+        if any(x in clean_text.lower() for x in ["speculative", "cannot provide", "ai model"]):
+            print("❌ Refusal detected.")
             return
 
         league_tag = target.split(' ')[0]
@@ -112,11 +95,11 @@ def run():
 
         try:
             X_CLIENT.create_tweet(text=tweet_text, user_auth=True)
-            print(f"🚀 SUCCESS! Posted {target} standings.")
+            print("🚀 Posted successfully!")
         except Exception as x_err:
-            print(f"❌ X API Error: {x_err}")
+            print(f"❌ X Error: {x_err}")
     else:
-        print("❌ Final response was empty.")
+        print("❌ All model attempts failed.")
 
 if __name__ == "__main__":
     run()
