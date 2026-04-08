@@ -18,7 +18,7 @@ X_CLIENT = tweepy.Client(
 )
 
 search_tool = types.Tool(google_search=types.GoogleSearch())
-CURRENT_MODEL = "gemini-2.5-flash"
+CURRENT_MODEL = "gemini-2.0-flash" # Reverting to the most stable 2026 ID
 
 POOL = [
     "NHL Central Division", "NHL Pacific Division", "NHL Atlantic Division", "NHL Metropolitan Division",
@@ -31,73 +31,76 @@ POOL = [
 def run():
     target = random.choice(POOL)
     
-    # Anchor the AI to the actual current date
+    # Clean Date Logic
     tz = pytz.timezone('America/Chicago')
     now = datetime.now(tz)
-    current_date_str = now.strftime("%B %d, %2026")
-    timestamp_str = now.strftime("%I:%M %p CT")
+    date_label = now.strftime("%B %d, 2026")
+    timestamp_label = now.strftime("%I:%M %p CT")
     
-    print(f"🤖 Processing {target} for {current_date_str}...")
+    print(f"🤖 Processing {target} for {date_label}...")
 
     season_term = "2026 season" if any(x in target for x in ["MLB", "MLS"]) else "2025-26 season"
 
-    # Strict "Data Retrieval" prompt
+    # Stage 1: Attempt Grounded Search
     prompt = (
-        f"Today is {current_date_str}. Use Google Search to find the ACTUAL standings "
-        f"for the {target} {season_term}. List the top 5 teams. "
-        "Format: Rank. Team: Record (Pts/GB). "
-        "DO NOT give a disclaimer. DO NOT say you cannot predict the future. "
-        "Simply output the factual data found in search results."
+        f"Provide the current top 5 standings for the {target} {season_term}. "
+        f"Today is {date_label}. Use Google Search. "
+        "Format: Rank. Team: Record (Pts/GB). List only. No intro text."
     )
     
-    safety = [types.SafetySetting(category=c, threshold="BLOCK_NONE") for c in [
-        "HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH", 
-        "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"
-    ]]
-
+    response_text = None
+    
     try:
+        print("🔍 Attempting Grounded Search...")
         response = client.models.generate_content(
             model=CURRENT_MODEL,
             contents=prompt,
-            config=types.GenerateContentConfig(tools=[search_tool], safety_settings=safety)
+            config=types.GenerateContentConfig(tools=[search_tool])
         )
-        
-        # Detection for the "As an AI..." refusal
-        text = response.text or ""
-        if "hypothetical" in text.lower() or "speculative" in text.lower() or "cannot provide" in text.lower():
-            raise ValueError("Model gave a refusal disclaimer instead of data.")
-
+        if response.text and "Rank." in response.text:
+            response_text = response.text
     except Exception as e:
-        print(f"⚠️ Search failed or refused: {e}. Trying raw fallback...")
-        response = client.models.generate_content(
-            model=CURRENT_MODEL,
-            contents=f"List the top 5 standings for {target} as of {current_date_str}. Data only.",
-            config=types.GenerateContentConfig(safety_settings=safety)
-        )
+        print(f"⚠️ Search failed: {e}")
 
-    if response and response.text:
-        # Scrub citations and refusals
-        clean_text = re.sub(r'\[\d+\]', '', response.text.strip())
+    # Stage 2: Fallback to Internal Knowledge if Stage 1 failed
+    if not response_text:
+        print("🔄 Falling back to internal knowledge...")
+        try:
+            fallback_prompt = f"List the top 5 teams in the {target} as of early April 2026. Format: Team (Record). No intro."
+            response = client.models.generate_content(
+                model=CURRENT_MODEL,
+                contents=fallback_prompt
+            )
+            response_text = response.text
+        except Exception as e2:
+            print(f"❌ Critical Error: Fallback also failed: {e2}")
+            return
+
+    # Post Processing & Tweeting
+    if response_text:
+        # Clean up citation markers like [1], [2]
+        clean_standings = re.sub(r'\[\d+\]', '', response_text.strip())
         
-        # Final safety check: if the model STILL refused, don't post to X
-        if "speculative" in clean_text.lower() or "predict" in clean_text.lower():
-            print("❌ Post cancelled: Model persisted in refusal.")
+        # Guard against the "As an AI..." lecture
+        if "speculative" in clean_standings.lower() or "cannot predict" in clean_standings.lower():
+            print("❌ Refusal detected in response. Aborting post.")
             return
 
         league_tag = target.split(' ')[0]
-        tweet_text = f"📊 {target} Standings\n({current_date_str})\n\n{clean_text}\n\n🕒 {timestamp_str}\n#{league_tag} #Sports"
+        tweet_text = f"📊 {target} Standings\n({date_label})\n\n{clean_standings}\n\n🕒 {timestamp_label}\n#{league_tag} #Sports"
         
+        # X character limit safety
         if len(tweet_text) > 280:
             tweet_text = tweet_text[:277] + "..."
 
         try:
-            print(f"🐦 Posting:\n{tweet_text}")
+            print(f"🐦 Posting to X...")
             X_CLIENT.create_tweet(text=tweet_text, user_auth=True)
             print("🚀 SUCCESS!")
         except Exception as x_err:
             print(f"❌ X API Error: {x_err}")
     else:
-        print("❌ No response content.")
+        print("❌ Final response was empty.")
 
 if __name__ == "__main__":
     run()
