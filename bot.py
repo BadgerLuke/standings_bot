@@ -16,10 +16,14 @@ X_CLIENT = tweepy.Client(
     access_token_secret=os.environ.get("X_ACCESS_SECRET")
 )
 
+# New 2026 search tool configuration
 search_tool = types.Tool(google_search=types.GoogleSearch())
-CURRENT_MODEL = "gemini-2.5-flash"
 
-# Comprehensive 2026 Sports Pool
+# USE THE NEW 3.1 MODEL (Released April 2026)
+# If 'gemini-3.1-flash' isn't in your region yet, use 'gemini-3-flash-preview'
+CURRENT_MODEL = "gemini-3.1-flash"
+
+# --- SPORTS POOL ---
 POOL = [
     "NHL Central Division", "NHL Pacific Division", "NHL Atlantic Division", "NHL Metropolitan Division",
     "NBA Atlantic Division", "NBA Central Division", "NBA Southeast Division", "NBA Northwest Division", "NBA Pacific Division", "NBA Southwest Division",
@@ -32,25 +36,37 @@ def run():
     target = random.choice(POOL)
     print(f"🤖 Processing {target}...")
 
-    # Strict formatting to stay under X's character limit
     prompt = (
-        f"Give me current top 5 standings for {target}. "
+        f"Give me the current top 5 standings for {target}. "
         "Format: 'Rank. Team: Record (Pts/GB)'. "
-        "Use 1 line per team. No conversational text. Be ultra-concise."
+        "1 line per team. No intro. Today is April 8, 2026."
     )
     
+    # NEW: Safety settings to prevent "Empty Text" errors
+    safety_settings = [
+        types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="BLOCK_NONE"),
+        types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_NONE"),
+        types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_NONE"),
+        types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_NONE"),
+    ]
+
     response = None
     try:
+        print(f"🔍 Fetching data with {CURRENT_MODEL}...")
         response = client.models.generate_content(
             model=CURRENT_MODEL,
             contents=prompt,
-            config=types.GenerateContentConfig(tools=[search_tool])
+            config=types.GenerateContentConfig(
+                tools=[search_tool],
+                safety_settings=safety_settings
+            )
         )
     except Exception as e:
-        print(f"⚠️ Search tool skipped: {e}")
+        print(f"⚠️ Search failed: {e}. Trying fallback...")
         response = client.models.generate_content(
             model=CURRENT_MODEL,
-            contents=prompt + " (Use internal memory)."
+            contents=prompt + " (Use internal data)",
+            config=types.GenerateContentConfig(safety_settings=safety_settings)
         )
 
     if response and response.text:
@@ -59,30 +75,25 @@ def run():
             tz = pytz.timezone('America/Chicago')
             timestamp = datetime.now(tz).strftime("%I:%M %p CT")
             
-            # --- THE ANTI-403 LOGIC ---
-            # 1. Add a random 'vibe' prefix to avoid duplicate content filters
-            prefixes = ["Latest look at", "Updated standings for", "Current rankings:", "State of the", "Checking in on"]
+            prefixes = ["Latest update:", "Current standings:", "State of play:", "Rankings update:"]
             prefix = random.choice(prefixes)
-            
-            # 2. Dynamic Hashtags
             league_tag = target.split(' ')[0]
             
-            # 3. Assemble Tweet
-            tweet_text = f"📊 {prefix} {target}:\n\n{standings_text}\n\n🕒 {timestamp}\n#{league_tag} #Sports"
+            tweet_text = f"📊 {prefix} {target}\n\n{standings_text}\n\n🕒 {timestamp}\n#{league_tag} #SportsBot"
             
-            # 4. Final Length Check (Safety for Free Tier)
-            if len(tweet_text) > 275:
-                tweet_text = tweet_text[:270] + "..."
-
-            print(f"🐦 Posting:\n{tweet_text}")
+            # Post to X
             X_CLIENT.create_tweet(text=tweet_text, user_auth=True)
-            print(f"🚀 Success!")
+            print(f"🚀 Success! Posted to X.")
             
         except Exception as post_err:
             print(f"❌ X API Error: {post_err}")
-            print("💡 TIP: If this is a 403, try regenerating your X Access Tokens in the Dev Portal.")
     else:
-        print("❌ Model failed to return text.")
+        # Debugging: Why did it return nothing?
+        if hasattr(response, 'candidates') and response.candidates:
+            reason = response.candidates[0].finish_reason
+            print(f"❌ API blocked response. Finish Reason: {reason}")
+        else:
+            print("❌ Absolute empty response from Google.")
 
 if __name__ == "__main__":
     run()
