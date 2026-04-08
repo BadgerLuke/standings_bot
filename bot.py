@@ -17,7 +17,6 @@ X_CLIENT = tweepy.Client(
 )
 
 search_tool = types.Tool(google_search=types.GoogleSearch())
-# Using the stable 2026 workhorse model
 CURRENT_MODEL = "gemini-2.5-flash"
 
 POOL = [
@@ -32,14 +31,12 @@ def run():
     target = random.choice(POOL)
     print(f"🤖 Processing {target}...")
 
-    # We use a more "journalistic" prompt to avoid safety triggers
     prompt = (
-        f"Act as a sports data journalist. Provide a neutral report of the top 5 standings for {target}. "
-        "Format: 'Rank. Team: Record (Pts/GB)'. "
-        "Provide only the list data. Today is April 8, 2026."
+        f"Search for the current top 5 standings of the {target} for the 2025-26 season. "
+        "Return ONLY a list in this format: 'Rank. Team: Record (Pts/GB)'. "
+        "Do not include any other text, analysis, or citations."
     )
     
-    # NEW: Safety Overrides (Required for sports content in 2026)
     safety_settings = [
         types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="BLOCK_NONE"),
         types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_NONE"),
@@ -49,7 +46,7 @@ def run():
 
     response = None
     try:
-        print(f"🔍 Fetching data with {CURRENT_MODEL}...")
+        print(f"🔍 Attempt 1: Grounded Search...")
         response = client.models.generate_content(
             model=CURRENT_MODEL,
             contents=prompt,
@@ -58,32 +55,41 @@ def run():
                 safety_settings=safety_settings
             )
         )
+        
+        # If Attempt 1 returned nothing, trigger the fallback immediately
+        if not response.text:
+            raise ValueError("Empty response text")
+            
     except Exception as e:
-        print(f"⚠️ API Exception: {e}")
-        return
+        print(f"⚠️ Attempt 1 failed or empty ({e}). Switching to Fallback...")
+        response = client.models.generate_content(
+            model=CURRENT_MODEL,
+            contents=f"Provide the 2025-26 standings for {target}. Format as a list. No intro.",
+            config=types.GenerateContentConfig(safety_settings=safety_settings)
+        )
 
-    # Debugging the response structure
     if response and response.text:
         try:
             standings_text = response.text.strip()
+            
+            # If the model still gave us citations [1], [2], clean them out for X
+            import re
+            standings_text = re.sub(r'\[\d+\]', '', standings_text)
+            
             tz = pytz.timezone('America/Chicago')
             timestamp = datetime.now(tz).strftime("%I:%M %p CT")
             
             league_tag = target.split(' ')[0]
-            tweet_text = f"📊 {target} Standings\n\n{standings_text}\n\n🕒 {timestamp}\n#{league_tag} #SportsUpdates"
+            tweet_text = f"📊 {target} Standings\n\n{standings_text}\n\n🕒 {timestamp}\n#{league_tag} #Sports"
             
+            print(f"🐦 Posting to X...")
             X_CLIENT.create_tweet(text=tweet_text, user_auth=True)
-            print(f"🚀 Success! Posted to X.")
+            print(f"🚀 Success!")
             
         except Exception as post_err:
             print(f"❌ X API Error: {post_err}")
     else:
-        # Check if it was blocked by safety
-        if hasattr(response, 'candidates') and response.candidates:
-            reason = response.candidates[0].finish_reason
-            print(f"❌ Generation Blocked. Reason: {reason}")
-        else:
-            print("❌ Absolute empty response. This may be a temporary Google API outage.")
+        print("❌ Critical: Both attempts returned no content.")
 
 if __name__ == "__main__":
     run()
