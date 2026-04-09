@@ -17,7 +17,8 @@ X_CLIENT = tweepy.Client(
     access_token_secret=os.environ.get("X_ACCESS_SECRET")
 )
 
-# New 2026 Primary Alias
+# --- CONFIGURATION ---
+NBA_COMMUNITY_ID = "1510261147114516482" 
 PREFERRED_MODEL = "gemini-3-flash-preview"
 
 ALL_DIVISIONS = [
@@ -38,26 +39,16 @@ def run():
     season = "2026" if any(x in target for x in ["MLB", "MLS"]) else "2025-26"
     prompt = f"Current top 5 standings for {target} {season}. Today is {date_label}. Use Google Search. Format: Rank. Team: Record. No intro."
 
-    # --- AUTO-DISCOVERY LOGIC ---
-    working_model = None
+    # --- AUTO-DISCOVERY MODEL LOGIC ---
+    working_model = PREFERRED_MODEL
     try:
-        # Check if our preferred model works
         client.models.get(model=PREFERRED_MODEL)
-        working_model = PREFERRED_MODEL
     except:
-        print(f"⚠️ {PREFERRED_MODEL} not found. Searching for active models...")
-        try:
-            # Dynamically fetch whatever Flash model Google is currently serving
-            available = [m.name for m in client.models.list() if "flash" in m.name.lower()]
-            if available:
-                working_model = available[0].replace("models/", "") 
-                print(f"✅ Found working alternative: {working_model}")
-        except Exception as e:
-            print(f"❌ Could not list models: {e}")
-            return
+        available = [m.name for m in client.models.list() if "flash" in m.name.lower()]
+        working_model = available[0].replace("models/", "") if available else None
 
-    if not working_model:
-        print("❌ No compatible models found for this API key.")
+    if not working_model: 
+        print("❌ No available models found.")
         return
 
     try:
@@ -69,15 +60,34 @@ def run():
         
         if response and response.text:
             clean_text = re.sub(r'\[\d+\]', '', response.text.strip())
-            
-            # Post to X
             league_tag = target.split(' ')[0]
-            tweet_text = f"📊 {target} Standings\n({date_label})\n\n{clean_text}\n\n🕒 {now.strftime('%I:%M %p CT')}\n#{league_tag} #Sports"
             
+            tweet_text = (f"📊 {target} Standings\n({date_label})\n\n"
+                          f"{clean_text}\n\n"
+                          f"🕒 {now.strftime('%I:%M %p CT')}\n"
+                          f"#{league_tag} #SportsUpdates")
+
+            # --- POSTING LOGIC ---
+            # 1. Post to your main feed
+            print("🐦 Posting to main feed...")
             X_CLIENT.create_tweet(text=tweet_text[:280], user_auth=True)
-            print(f"🚀 SUCCESS! Posted using {working_model}")
+
+            # 2. Duplicate to NBA Community if applicable
+            if "NBA" in target:
+                print(f"🏀 NBA target detected. Cross-posting to Community {NBA_COMMUNITY_ID}...")
+                try:
+                    # Posting to the community
+                    X_CLIENT.create_tweet(
+                        text=tweet_text[:280], 
+                        community_id=NBA_COMMUNITY_ID,
+                        user_auth=True
+                    )
+                except Exception as comm_err:
+                    print(f"⚠️ Community post failed: {comm_err}")
+
+            print("🚀 SUCCESS!")
         else:
-            print("❌ Model returned no content.")
+            print("❌ No content generated.")
             
     except Exception as e:
         print(f"❌ Execution error: {e}")
