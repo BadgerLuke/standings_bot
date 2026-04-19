@@ -3,7 +3,7 @@ import random
 import tweepy
 from google import genai
 from google.genai import types
-from datetime import datetime
+from datetime import datetime, date
 import pytz
 import re
 import tempfile
@@ -38,6 +38,30 @@ ALL_DIVISIONS = [
     "MLB AL East", "MLB AL Central", "MLB AL West", "MLB NL East", "MLB NL Central", "MLB NL West",
     "MLS Eastern Conference", "MLS Western Conference"
 ]
+
+# Approximate regular season windows (month, day). Ranges that cross Dec 31 are handled automatically.
+REGULAR_SEASON_WINDOWS = {
+    "NHL": ((10, 8),  (4, 18)),   # Oct 8 – Apr 18
+    "NBA": ((10, 20), (4, 15)),   # Oct 20 – Apr 15
+    "MLB": ((3, 27),  (9, 29)),   # Mar 27 – Sep 29
+    "MLS": ((2, 22),  (10, 20)),  # Feb 22 – Oct 20
+}
+
+def _in_regular_season(league, today: date) -> bool:
+    start_md, end_md = REGULAR_SEASON_WINDOWS[league]
+    start = date(today.year, start_md[0], start_md[1])
+    end   = date(today.year, end_md[0],   end_md[1])
+    if start <= end:
+        return start <= today <= end
+    # Range wraps across year boundary (e.g. Oct–Apr)
+    return today >= start or today <= end
+
+def get_active_divisions(today: date) -> list:
+    active = [lg for lg in REGULAR_SEASON_WINDOWS if _in_regular_season(lg, today)]
+    print(f"Leagues in regular season: {active if active else 'none — falling back to all'}")
+    if not active:
+        return ALL_DIVISIONS
+    return [div for div in ALL_DIVISIONS if any(div.startswith(lg) for lg in active)]
 
 FONT_PATHS = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
@@ -123,7 +147,8 @@ def run():
     now = datetime.now(tz)
     date_label = now.strftime("%B %d, %Y")
 
-    target = random.choice(ALL_DIVISIONS)
+    active_divisions = get_active_divisions(now.date())
+    target = random.choice(active_divisions)
     print(f"Target: {target}")
 
     season = "2026" if any(x in target for x in ["MLB", "MLS"]) else "2025-26"
